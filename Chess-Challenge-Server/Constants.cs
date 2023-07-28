@@ -6,6 +6,6 @@ public class Constants
     public const string SERVER_VERSION = "0.1"; // Just to track for any changelog later
         
         
-    public const string SERVER_HOSTNAME = "127.0.0.1"; // Ip to connect to as the server
+    public const string SERVER_HOSTNAME = "0.0.0.0"; // Ip to connect to as the server
     public const int SERVER_PORT = 4578; // Open port of the server
 }
