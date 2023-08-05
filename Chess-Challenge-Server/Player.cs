@@ -88,7 +88,28 @@ public sealed class Player : IDisposable
         _unreadMessage = null;
         _readingTask = Task.Run(() =>
         {
-            _unreadMessage = Stream.DecodeNextMessage(_streamReadCancellationSource.Token);
+            try
+            {
+                var msg = Stream.DecodeNextMessage(_streamReadCancellationSource.Token);
+                while (msg is PingMsg
+                       && _streamReadCancellationSource is not null
+                       && _streamReadCancellationSource.IsCancellationRequested == false)
+                {
+                    msg = Stream.DecodeNextMessage(_streamReadCancellationSource.Token);
+                }
+
+                if (msg is PingMsg) msg = null;
+
+                _unreadMessage = msg;
+            }
+            catch (ObjectDisposedException)
+            {
+                //ignored
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine(e);
+            }
         });
     }
 
