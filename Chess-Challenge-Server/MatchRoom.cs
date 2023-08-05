@@ -284,7 +284,7 @@ public class MatchRoom
             {
                 WhitePlayer = player;
 
-                StartPingThread(id, player);
+                //StartPingThread(RoomId, player);
                 
                 if (BlackPlayer is null || !IsBlackPlayerLive()) 
                     return true;
@@ -334,7 +334,7 @@ public class MatchRoom
             if (BlackPlayer is null)
             {
                 BlackPlayer = player;
-                StartPingThread(id, player);
+             //   StartPingThread(RoomId, player);
 
                 if (WhitePlayer is null || !IsWhitePlayerLive()) 
                     return true;
@@ -401,7 +401,8 @@ public class MatchRoom
             {
                 try
                 {
-                    Task.Delay(5000).Wait();
+                    Task.Delay(2000).Wait();
+                    Console.WriteLine("Pinged");
                     player?.SendMessage(new PingMsg());
                 }
                 catch
