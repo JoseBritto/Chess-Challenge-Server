@@ -62,49 +62,105 @@ public class GameServer
             // Get a stream object for reading and writing
             var stream = client.GetStream();
 
-            SendMessage(serverHello, stream);
+            stream.EncodeMessage(serverHello);
 
             Console.WriteLine("Hello Sent!");
 
-            var clientHello = ReceiveClientHello(stream);
+            //TODO: Handle shutdown message
+            var clientHello = (ClientHelloMsg) (stream.DecodeNextMessage() ?? throw new Exception("Client sent wrong message!"));
 
             if (clientHello.ProtocolVersion != PROTOCOL_VERSION)
             {
                 Console.WriteLine("Incompatible client! Closing connection..");
-                client.Close();
+                
+                stream.EncodeMessage(new Reject());
+                
+                stream.EncodeMessage(new ShutdownMsg
+                {
+                    Reason = "Incompatible version!"
+                });
+                try
+                {
+                    Task.Delay(1000).ContinueWith(x =>
+                    {
+                        client.Close(); // Close the connection after a second
+                    });
+                    return;
+                }
+                catch
+                {
+                    // ignored
+                }
+
                 return;
             }
+            stream.EncodeMessage(new Ack());
 
             roomId = clientHello.RoomId;
 
-            bool isWhite;
             if (ActiveRooms.TryGetValue(clientHello.RoomId, out var room))
             {
-                var roomResult = room.TryAddPlayer(serverHello.SessionId, client, false, out isWhite);
+                var roomResult = room.TryAddPlayer(serverHello.SessionId, client, clientHello.UserName);
 
                 if (roomResult == false)
                 {
-                    Console.WriteLine("Room Full!"); // TODO: Sent this to client too before closing
-                    client.Close();
+                    Console.WriteLine($"Room {clientHello.RoomId} Full!");
+                    stream.EncodeMessage(new Reject());
+                    stream.EncodeMessage(new ShutdownMsg
+                    {
+                        Reason = "Room full"
+                    });
+                    Task.Delay(1000).ContinueWith(x =>
+                    {
+                        client.Close();
+                    });
                     return;
                 }
             }
             else
             {
                 room = new MatchRoom(clientHello.RoomId);
-                room.TryAddPlayer(serverHello.SessionId, client, false, out isWhite);
+                room.TryAddPlayer(serverHello.SessionId, client, clientHello.UserName);
                 ActiveRooms.Add(clientHello.RoomId, room);
             }
+            
+            Console.WriteLine($"Success with roomId {roomId}");
+            
+            stream.EncodeMessage(new GiveYourPrefs());
+            
+            var msg = stream.DecodeNextMessage();
 
-
-            SendMessage(new RoomInfo
+            if (msg is ShutdownMsg sMsg)
             {
-                RoomId = clientHello.RoomId,
-                StartsOffAsWhite = isWhite
-            }, stream);
+                Console.WriteLine($"Shutdown Packet from a client! Reason: {sMsg.Reason}");
+                client.Close(); // Take action immediately if receive a remote shutdown notification
+                return;
+            }
 
+            if (msg is not ClientPrefs prefs)
+            {
+                Console.WriteLine($"Unknown packet from client of type {msg?.GetType().Name ?? "null"}");
+                return;
+            }
 
-            Task.Run(() => { room.TryStartNewGame(); }).ConfigureAwait(false); // Make that run in a new thread
+            if (prefs.Games != 1)
+            {
+                stream.EncodeMessage(new Reject());
+                Task.Delay(1000).ContinueWith(x =>
+                {
+                    client.Close();
+                });
+                return;
+            }
+            
+            if (room.PlayerMoveTimeMillis == -1)
+            {
+               room.TrySetPlayerMoveTime(prefs.PreferredClockMillis);
+            }
+
+            stream.EncodeMessage(new Ack());
+            //TODO: Compare fens from both players
+            Task.Run(() => { room.TryStartNewGame(prefs.StartFen); }).ConfigureAwait(false); // Make that run in a new thread
 
             Console.WriteLine("Transferred responsibility to MatchRoom");
         }
@@ -114,6 +170,9 @@ public class GameServer
             
             try
             {
+                // Dispose immediately
+                //TODO: Maybe consider trying to send a shutdown packet?
+                
                 client.Close();
             }
             finally
@@ -122,27 +181,7 @@ public class GameServer
                     ActiveRooms.Remove(roomId);
             }
         }
-
-        ClientHelloMsg ReceiveClientHello(NetworkStream networkStream)
-        {
-            var result = ReadMessage<ClientHelloMsg>(networkStream);
-            
-            Console.WriteLine(result.ProtocolVersion);
-            Console.WriteLine(result.ClientVersion);
-            Console.WriteLine(result.RoomId);
-            return result;
-        }
     }
     
-    
-    static void SendMessage(ISerializableMessage message, Stream stream) => message.SerializeIntoStream(stream);
-
-    static T ReadMessage<T>(Stream stream) where T : ISerializableMessage, new()
-    {
-        var ret = new T();
-            
-        ret.ReadFromStream(stream);
-        return ret;
-    }
 
 }
